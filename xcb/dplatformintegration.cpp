@@ -284,6 +284,32 @@ void DPlatformIntegration::setWMClassName(const QByteArray &name)
         self->m_wmClass = name;
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+static void nativeWindowCreated(QNativeWindow *w)
+{
+    VtableHook::callOriginalFun(w, &QNativeWindow::create);
+    if (w->property("_d_dxcb_noTitleHelper").toBool()) {
+        if (w->property("_d_dxcb_noTitleHelper_destroyed").toBool()) {
+            w->setProperty("_d_dxcb_noTitleHelper_destroyed", QVariant());
+            qCDebug(lcDxcb) << "window is recreated:" << w->window() << ", winId:" << w->winId();
+            if (auto helper = DNoTitlebarWindowHelper::windowHelper(w->window())) {
+                delete helper;
+            }
+            // 跟随窗口被销毁
+            Q_UNUSED(new DNoTitlebarWindowHelper(w->window(), w->winId()))
+        }
+    }
+}
+
+static void nativeWindowDestroyed(QNativeWindow *w)
+{
+    VtableHook::callOriginalFun(w, &QNativeWindow::destroy);
+    if (w->property("_d_dxcb_noTitleHelper").toBool()) {
+        w->setProperty("_d_dxcb_noTitleHelper_destroyed", true);
+    }
+}
+#endif
+
 QPlatformWindow *DPlatformIntegration::createPlatformWindow(QWindow *window) const
 {
     qCDebug(lcDxcb) << "window:" << window << "window type:" << window->type() << "parent:" << window->parent();
@@ -292,6 +318,7 @@ QPlatformWindow *DPlatformIntegration::createPlatformWindow(QWindow *window) con
         printf("New Window: %s(0x%llx, name: \"%s\")\n", window->metaObject()->className(), (quintptr)window, qPrintable(window->objectName()));
     }
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     // handle foreign native window
     if (window->type() == Qt::ForeignWindow) {
         WId win_id = qvariant_cast<WId>(window->property("_q_foreignWinId"));
@@ -300,6 +327,7 @@ QPlatformWindow *DPlatformIntegration::createPlatformWindow(QWindow *window) con
             return new DForeignPlatformWindow(window, win_id);
         }
     }
+#endif
 
     bool isNoTitlebar = window->type() != Qt::Desktop && window->property(noTitlebar).toBool();
 
@@ -313,6 +341,13 @@ QPlatformWindow *DPlatformIntegration::createPlatformWindow(QWindow *window) con
         Utility::setNoTitlebar(w->winId(), true);
         // 跟随窗口被销毁
         Q_UNUSED(new DNoTitlebarWindowHelper(window, w->winId()))
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        // recreate DNotitleBarWindoHelper if window is recreated.
+        QNativeWindow *xw = static_cast<QNativeWindow*>(w);
+        xw->setProperty("_d_dxcb_noTitleHelper", true);
+        VtableHook::overrideVfptrFun(xw, &QNativeWindow::create, &nativeWindowCreated);
+        VtableHook::overrideVfptrFun(xw, &QNativeWindow::destroy, &nativeWindowDestroyed);
+#endif
 #ifdef Q_OS_LINUX
         WindowEventHook::init(static_cast<QNativeWindow*>(w), false);
 #endif
@@ -408,6 +443,16 @@ QPlatformWindow *DPlatformIntegration::createPlatformWindow(QWindow *window) con
     }
 
     return xw;
+}
+
+QPlatformWindow *DPlatformIntegration::createForeignWindow(QWindow *window, WId winId) const
+{
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+    return DPlatformIntegrationParent::createForeignWindow(window, winId);
+#else
+    Q_ASSERT(winId > 0);
+    return new DForeignPlatformWindow(window, winId);
+#endif
 }
 
 QPlatformBackingStore *DPlatformIntegration::createPlatformBackingStore(QWindow *window) const
@@ -1011,6 +1056,22 @@ static void startDrag(QXcbDrag *drag)
     xcb_flush(drag->xcb_connection());
 }
 
+static void cursorThemePropertyChanged(xcb_connection_t *connection, const QByteArray &name, const QVariant &property, void *handle)
+{
+    Q_UNUSED(connection);
+    Q_UNUSED(name);
+    Q_UNUSED(property);
+    Q_UNUSED(handle)
+
+    QMetaObject::invokeMethod(qApp, [](){
+        for (const auto window : qApp->allWindows()) {
+            auto cursor = window->cursor();
+            if (window->screen() && window->screen()->handle() && window->screen()->handle()->cursor())
+                overrideChangeCursor(window->screen()->handle()->cursor(), &cursor, window);
+        }
+    }, Qt::QueuedConnection);
+}
+
 void DPlatformIntegration::initialize()
 {
     // 由于Qt很多代码中写死了是xcb，所以只能伪装成是xcb
@@ -1131,6 +1192,9 @@ void DPlatformIntegration::initialize()
             });
         }
     }
+
+    // Qt中同样监听了这个属性的变化，但是只刷新了光标上下文却没有更新当前窗口的光标，无法做到光标的实时变化，所以加了该逻辑额外处理
+    xSettings()->registerCallbackForProperty("Gtk/CursorThemeName", cursorThemePropertyChanged, nullptr);
 }
 
 #ifdef Q_OS_LINUX

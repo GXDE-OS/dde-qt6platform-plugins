@@ -29,6 +29,8 @@ DPP_BEGIN_NAMESPACE
 
 QHash<const QWindow*, DNoTitlebarWindowHelper*> DNoTitlebarWindowHelper::mapped;
 
+static QHash<DNoTitlebarWindowHelper*, QPointF> g_pressPoint;
+
 DNoTitlebarWindowHelper::DNoTitlebarWindowHelper(QWindow *window, quint32 windowID)
     : QObject(window)
     , m_window(window)
@@ -77,11 +79,13 @@ DNoTitlebarWindowHelper::DNoTitlebarWindowHelper(QWindow *window, quint32 window
 
 DNoTitlebarWindowHelper::~DNoTitlebarWindowHelper()
 {
+    g_pressPoint.remove(this);
+
     if (VtableHook::hasVtable(m_window)) {
         VtableHook::resetVtable(m_window);
     }
 
-    mapped.remove(qobject_cast<QWindow*>(parent()));
+    mapped.remove(static_cast<QWindow*>(parent()));
 
     if (m_window->handle()) { // 当本地窗口还存在时，移除设置过的窗口属性
         Utility::clearWindowProperty(m_windowID, Utility::internAtom(_DEEPIN_SCISSOR_WINDOW));
@@ -278,6 +282,11 @@ void DNoTitlebarWindowHelper::setWindowEffect(quint32 effectScene)
 void DNoTitlebarWindowHelper::setWindowStartUpEffect(quint32 effectType)
 {
     setProperty("windowStartUpEffect", effectType);
+}
+
+DNoTitlebarWindowHelper *DNoTitlebarWindowHelper::windowHelper(const QWindow *window)
+{
+    return mapped.value(window);
 }
 
 void DNoTitlebarWindowHelper::updateClipPathFromProperty()
@@ -510,6 +519,12 @@ bool DNoTitlebarWindowHelper::windowEvent(QEvent *event)
 {
     QWindow *w = this->window();
 
+    // TODO Crashed when delete by Vtable.
+    if (event->type() == QEvent::DeferredDelete) {
+        VtableHook::resetVtable(w);
+        return w->event(event);
+    }
+
     // get touch begin position
     static bool isTouchDown = false;
     static QPointF touchBeginPosition;
@@ -538,6 +553,7 @@ bool DNoTitlebarWindowHelper::windowEvent(QEvent *event)
     if (event->type() == QEvent::MouseButtonRelease) {
         self->m_windowMoving = false;
         Utility::updateMousePointForWindowMove(winId, true);
+        g_pressPoint.remove(this);
     }
 
     if (is_mouse_move && self->m_windowMoving) {
@@ -551,12 +567,18 @@ bool DNoTitlebarWindowHelper::windowEvent(QEvent *event)
     // keeping the moving state, we can just reset ti back to normal.
     if (event->type() == QEvent::MouseButtonPress) {
         self->m_windowMoving = false;
+        g_pressPoint[this] = dynamic_cast<QMouseEvent*>(event)->globalPos();
     }
 
-    if (is_mouse_move && !event->isAccepted()) {
+    if (is_mouse_move && !event->isAccepted() && g_pressPoint.contains(this)) {
         QMouseEvent *me = static_cast<QMouseEvent*>(event);
         QRect windowRect = QRect(QPoint(0, 0), w->size());
         if (!windowRect.contains(me->windowPos().toPoint())) {
+            return ret;
+        }
+
+        QPointF delta = me->globalPos() - g_pressPoint[this];
+        if (delta.manhattanLength() < QGuiApplication::styleHints()->startDragDistance()) {
             return ret;
         }
 
