@@ -284,7 +284,7 @@ void DPlatformIntegration::setWMClassName(const QByteArray &name)
         self->m_wmClass = name;
 }
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
 static void nativeWindowCreated(QNativeWindow *w)
 {
     VtableHook::callOriginalFun(w, &QNativeWindow::create);
@@ -341,7 +341,7 @@ QPlatformWindow *DPlatformIntegration::createPlatformWindow(QWindow *window) con
         Utility::setNoTitlebar(w->winId(), true);
         // 跟随窗口被销毁
         Q_UNUSED(new DNoTitlebarWindowHelper(window, w->winId()))
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
         // recreate DNotitleBarWindoHelper if window is recreated.
         QNativeWindow *xw = static_cast<QNativeWindow*>(w);
         xw->setProperty("_d_dxcb_noTitleHelper", true);
