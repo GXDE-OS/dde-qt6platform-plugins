@@ -136,10 +136,15 @@ void DBackingStoreProxy::composeAndFlush(QWindow *window, const QRegion &region,
 {
     m_proxy->composeAndFlush(window, region, offset, textures, translucentBackground);
 }
-#else
+#elif QT_VERSION < QT_VERSION_CHECK(6, 9, 2)
 QPlatformBackingStore::FlushResult DBackingStoreProxy::rhiFlush(QWindow *window, qreal sourceDevicePixelRatio, const QRegion &region, const QPoint &offset, QPlatformTextureList *textures, bool translucentBackground)
 {
     return m_proxy->rhiFlush(window, sourceDevicePixelRatio, region, offset, textures, translucentBackground);
+}
+#else
+QPlatformBackingStore::FlushResult DBackingStoreProxy::rhiFlush(QWindow *window, qreal sourceDevicePixelRatio, const QRegion &region, const QPoint &offset, QPlatformTextureList *textures, bool translucentBackground, qreal sourceTransformFactor)
+{
+    return m_proxy->rhiFlush(window, sourceDevicePixelRatio, region, offset, textures, translucentBackground, sourceTransformFactor);
 }
 #endif
 
@@ -308,7 +313,6 @@ void DBackingStoreProxy::updateWallpaperShared()
     const qint32 *header = reinterpret_cast<const qint32*>(m_sharedMemory->constData());
     const uchar *content = reinterpret_cast<const uchar*>(m_sharedMemory->constData()) + HEADER_SIZE;
 
-    qint32 byte_count = header[0];
     qint32 image_width = header[1];
     qint32 image_height = header[2];
     qint32 image_format = header[3];
