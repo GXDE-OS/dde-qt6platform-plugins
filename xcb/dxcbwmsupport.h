@@ -105,6 +105,10 @@ public:
     QVector<xcb_window_t> allWindow() const;
     xcb_window_t windowFromPoint(const QPoint &p) const;
 
+    bool isEffectMode() const;                                          
+    static bool connectEffectModeChanged(QObject *object,              
+                                         std::function<void(bool)> slot);
+
 signals:
     void windowManagerChanged();
     void hasBlurWindowChanged(bool hasBlurWindow);
@@ -115,6 +119,7 @@ signals:
     void windowListChanged();
     void windowMotifWMHintsChanged(quint32 winId);
     void wallpaperSharedChanged();
+    void effectModeChanged(bool effectMode);   
 
 protected:
     explicit DXcbWMSupport();
@@ -158,6 +163,12 @@ private:
     friend class XcbNativeEventFilter;
     friend class Utility;
     friend class DBackingStoreProxy;
+    
+    void updateEffectMode();                                            
+    bool m_isEffectMode = false; 
+
+private slots:
+    void onCurrentWMChanged(const QString &wm);                         
 };
 
 DPP_END_NAMESPACE

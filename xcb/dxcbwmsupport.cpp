@@ -14,6 +14,11 @@
 #include "qxcbwindow.h"
 #include "3rdparty/clientwin.h"
 
+#include <QDBusInterface>
+#include <QDBusReply>
+#include <QDBusConnection>
+#include <QDebug>
+
 DPP_BEGIN_NAMESPACE
 
 class _DXcbWMSupport : public DXcbWMSupport {};
@@ -23,6 +28,18 @@ Q_GLOBAL_STATIC(_DXcbWMSupport, globalXWMS)
 DXcbWMSupport::DXcbWMSupport()
 {
     updateWMName(false);
+
+    // 初始化特效模式
+    updateEffectMode();
+
+    // 监听 D‑Bus 切换信号
+    QDBusConnection::sessionBus().connect(
+        QStringLiteral("com.deepin.WMSwitcher"),
+        QStringLiteral("/com/deepin/WMSwitcher"),
+        QStringLiteral("com.deepin.WMSwitcher"),
+        QStringLiteral("CurrentWMChanged"),
+        this,
+        SLOT(onCurrentWMChanged(QString)));
 
     connect(this, &DXcbWMSupport::windowMotifWMHintsChanged, this, [this] (quint32 winId) {
         for (const DFrameWindow *frame : DFrameWindow::frameWindowList) {
@@ -34,6 +51,44 @@ DXcbWMSupport::DXcbWMSupport()
             }
         }
     });
+}
+
+void DXcbWMSupport::updateEffectMode()
+{
+    QDBusInterface iface(QStringLiteral("com.deepin.WMSwitcher"),
+                         QStringLiteral("/com/deepin/WMSwitcher"),
+                         QStringLiteral("com.deepin.WMSwitcher"),
+                         QDBusConnection::sessionBus());
+    QDBusReply<QString> reply = iface.call(QStringLiteral("CurrentWM"));
+    if (!reply.isValid()) {
+        qWarning() << "DXcbWMSupport: Failed to get CurrentWM:" << reply.error().message();
+        return;
+    }
+
+    bool effect = (reply.value() == QStringLiteral("deepin wm"));
+    if (m_isEffectMode != effect) {
+        m_isEffectMode = effect;
+        // 模式变化后重新评估合成和模糊属性
+        updateHasComposite();
+        updateHasBlurWindow();
+        emit effectModeChanged(effect);
+    }
+}
+
+void DXcbWMSupport::onCurrentWMChanged(const QString &wm)
+{
+    bool effect = (wm == QStringLiteral("deepin wm"));
+    if (m_isEffectMode != effect) {
+        m_isEffectMode = effect;
+        updateHasComposite();
+        updateHasBlurWindow();
+        emit effectModeChanged(effect);
+    }
+}
+
+bool DXcbWMSupport::isEffectMode() const
+{
+    return m_isEffectMode;
 }
 
 void DXcbWMSupport::updateWMName(bool emitSignal)
@@ -151,10 +206,12 @@ void DXcbWMSupport::updateRootWindowProperties()
 
 void DXcbWMSupport::updateHasBlurWindow()
 {
-    bool hasBlurWindow((m_isDeepinWM && isSupportedByWM(_net_wm_deepin_blur_region_rounded_atom))
+    /*bool hasBlurWindow((m_isDeepinWM && isSupportedByWM(_net_wm_deepin_blur_region_rounded_atom))
                        || (m_isKwin && isContainsForRootWindow(_kde_net_wm_blur_rehind_region_atom)));
     // 当窗口visual不支持alpha通道时，也等价于不支持窗口背景模糊
-    hasBlurWindow = hasBlurWindow && getHasWindowAlpha();
+    hasBlurWindow = hasBlurWindow && getHasWindowAlpha();*/
+
+    bool hasBlurWindow = m_isEffectMode && getHasWindowAlpha();
 
     if (m_hasBlurWindow == hasBlurWindow)
         return;
@@ -166,7 +223,7 @@ void DXcbWMSupport::updateHasBlurWindow()
 
 void DXcbWMSupport::updateHasComposite()
 {
-    bool hasComposite;
+    /*bool hasComposite;
 
     xcb_connection_t *xcb_connection = DPlatformIntegration::xcbConnection()->xcb_connection();
 
@@ -205,7 +262,9 @@ void DXcbWMSupport::updateHasComposite()
         hasComposite = reply->owner != XCB_NONE;
 
         free(reply);
-    }
+    }*/
+
+    bool hasComposite = m_isEffectMode;   
 
     if (m_hasComposite == hasComposite)
         return;
@@ -566,6 +625,13 @@ bool DXcbWMSupport::Global::hasWallpaperEffect()
 QString DXcbWMSupport::Global::windowManagerName()
 {
     return DXcbWMSupport::instance()->windowManagerName();
+}
+
+bool DXcbWMSupport::connectEffectModeChanged(QObject *object, std::function<void(bool)> slot)
+{
+    if (!object)
+        return QObject::connect(globalXWMS, &DXcbWMSupport::effectModeChanged, slot);
+    return QObject::connect(globalXWMS, &DXcbWMSupport::effectModeChanged, object, slot);
 }
 
 DPP_END_NAMESPACE
