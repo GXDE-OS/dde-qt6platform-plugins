@@ -1,3 +1,9 @@
+dde-qt6platform-plugins (6.0.48-1) UNRELEASED; urgency=medium
+
+  * 修复特效一直关闭的问题
+
+ -- gfdgd_xi <3025613752@qq.com>  Fri, 19 Jun 2026 12:41:16 +0800
+
 dde-qt6platform-plugins (6.0.48) unstable; urgency=medium
 
   * Release 6.0.48
