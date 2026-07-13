@@ -1,4 +1,4 @@
-dde-qt6platform-plugins (6.0.48-1) UNRELEASED; urgency=medium
+dde-qt6platform-plugins (1:6.0.48-1) UNRELEASED; urgency=medium
 
   * 修复特效一直关闭的问题
 
