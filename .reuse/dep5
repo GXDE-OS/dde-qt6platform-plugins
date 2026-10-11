@@ -23,8 +23,8 @@ Files: .github/* .obs/workflows.yml .syncexclude VERSION.in
 Copyright: None
 License: CC0-1.0
 
-# archlinux
-Files: archlinux/*
+# arch
+Files: arch/*
 Copyright: None
 License: CC0-1.0
 

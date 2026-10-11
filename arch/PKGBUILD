@@ -1,0 +1,35 @@
+# Maintainer: justforlxz <justforlxz@gmail.com>
+pkgname=deepin-qt6platform-plugins-git
+pkgver=6.0.48
+pkgrel=2
+pkgdesc='Qt platform plugins for DDE'
+arch=('x86_64' 'aarch64')
+url="https://github.com/GXDE-OS/dde-qt6platform-plugins"
+license=('LGPL-3.0-or-later' 'GPL-3.0-or-later')
+depends=('qt6-base' 'libx11' 'libxcb' 'libxi' 'xcb-util-wm' 'xcb-util-cursor' 'libgcc' 'libstdc++' 'glibc')
+makedepends=('git' 'cmake' 'ninja' 'qt6-tools' 'qt6-xcb-private-headers' 'vulkan-headers')
+provides=("deepin-qt6platform-plugins=$pkgver")
+conflicts=('deepin-qt6platform-plugins')
+groups=('deepin-git')
+source=()
+sha512sums=()
+
+# 直接使用 PKGBUILD 所在的 git 仓库作为源码 ・ Build from the git checkout this PKGBUILD lives in.
+_srcroot() {
+  git -C "$startdir" rev-parse --show-toplevel
+}
+
+build() {
+  cmake -B build -S "$(_srcroot)" -GNinja \
+    -DCMAKE_BUILD_TYPE=None \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_INSTALL_LIBEXECDIR=lib \
+    -DQT_XCB_PRIVATE_HEADERS=/usr/include/qt6xcb-private \
+    -DBUILD_TESTING=OFF
+  ninja -C build
+}
+
+package() {
+  DESTDIR="$pkgdir" ninja -C build install
+}
