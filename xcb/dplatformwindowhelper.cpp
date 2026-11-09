@@ -75,7 +75,14 @@ DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
     // 防止被自动更新窗口大小(参见：qdeepintheme.cpp, https://github.com/linuxdeepin/qt5integration)
     m_frameWindow->setProperty("_d_disable_update_geometry_for_scale", true);
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // KWin can recreate a tooltip frame on its first show. Parenting the
+    // content earlier would destroy its native X11 window with the old frame.
+    if (window->window()->type() != Qt::ToolTip || !DXcbWMSupport::instance()->isKwin())
+        window->setParent(m_frameWindow->handle());
+#else
     window->setParent(m_frameWindow->handle());
+#endif
     window->window()->installEventFilter(this);
     window->window()->setScreen(m_frameWindow->screen());
     window->window()->setProperty("_d_real_winId", window->winId());
@@ -312,6 +319,12 @@ void DPlatformWindowHelper::setVisible(bool visible)
 #endif
 
         helper->m_frameWindow->setVisible(visible);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        if (helper->m_nativeWindow->window()->type() == Qt::ToolTip
+                && DXcbWMSupport::instance()->isKwin()) {
+            helper->m_nativeWindow->QNativeWindow::setParent(helper->m_frameWindow->handle());
+        }
+#endif
         helper->updateContentWindowGeometry();
         helper->m_nativeWindow->QNativeWindow::setVisible(visible);
         helper->updateWindowBlurAreasForWM();
