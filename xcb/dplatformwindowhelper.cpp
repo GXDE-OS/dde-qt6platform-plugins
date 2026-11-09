@@ -601,9 +601,19 @@ bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
         case QEvent::Close:
             m_nativeWindow->window()->close();
             return true;
+        case QEvent::WindowDeactivate:
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            // KWin may deactivate the frame while the tooltip content still
+            // owns Qt focus. Forwarding this event closes the popup at show.
+            if (m_nativeWindow->window()->type() == Qt::ToolTip
+                    && DXcbWMSupport::instance()->isKwin()
+                    && QGuiApplication::focusWindow() == m_nativeWindow->window())
+                return true;
+#endif
+            QCoreApplication::sendEvent(m_nativeWindow->window(), event);
+            return true;
         case QEvent::KeyPress:
         case QEvent::KeyRelease:
-        case QEvent::WindowDeactivate:
             QCoreApplication::sendEvent(m_nativeWindow->window(), event);
             return true;
         case QEvent::Move: {
