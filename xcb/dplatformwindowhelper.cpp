@@ -148,8 +148,13 @@ DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
             this, &DPlatformWindowHelper::onFrameWindowContentMarginsHintChanged);
     connect(DWMSupport::instance(), &DXcbWMSupport::hasCompositeChanged,
             this, &DPlatformWindowHelper::onWMHasCompositeChanged);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    connect(DWMSupport::instance(), &DXcbWMSupport::windowManagerChanged,
+            this, &DPlatformWindowHelper::onWindowManagerChanged);
+#else
     connect(DWMSupport::instance(), &DXcbWMSupport::windowManagerChanged,
             this, &DPlatformWindowHelper::updateWindowBlurAreasForWM);
+#endif
     // 必须保证两个窗口QScreen对象一致
     connect(m_frameWindow, &DFrameWindow::screenChanged,
             this, &DPlatformWindowHelper::onScreenChanged);
@@ -1503,6 +1508,28 @@ void DPlatformWindowHelper::onFrameWindowContentMarginsHintChanged(const QMargin
 
     updateContentWindowGeometry();
 }
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+void DPlatformWindowHelper::onWindowManagerChanged()
+{
+    updateWindowBlurAreasForWM();
+
+    const Qt::WindowFlags flags = dxcbFrameFlags(m_nativeWindow->window()->flags());
+    if (m_frameWindow->flags() == flags)
+        return;
+
+    // Qt XCB may recreate the frame when its stacking hints change. Keep
+    // the native content outside the old frame until the replacement shows.
+    const bool wasVisible = m_frameWindow->isVisible();
+    if (wasVisible)
+        setVisibleImpl(false);
+    m_nativeWindow->QNativeWindow::setParent(nullptr);
+    m_pendingNativeParent = true;
+    m_frameWindow->setFlags(flags);
+    if (wasVisible)
+        setVisibleImpl(true);
+}
+#endif
 
 void DPlatformWindowHelper::onWMHasCompositeChanged()
 {

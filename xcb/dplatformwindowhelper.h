@@ -98,6 +98,9 @@ public:
 
 private:
     void setVisibleImpl(bool visible);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    void onWindowManagerChanged();
+#endif
     bool eventFilter(QObject *watched, QEvent *event) Q_DECL_OVERRIDE;
     void setNativeWindowGeometry(const QRect &rect, bool onlyResize = false);
 
