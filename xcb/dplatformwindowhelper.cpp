@@ -43,6 +43,18 @@ PUBLIC_CLASS(QWheelEvent, DPlatformWindowHelper);
 
 QHash<const QPlatformWindow*, DPlatformWindowHelper*> DPlatformWindowHelper::mapped;
 
+static Qt::WindowFlags dxcbFrameFlags(Qt::WindowFlags flags)
+{
+    // On KWin/X11, combining override-redirect and stays-on-top on the
+    // DXCB frame can hide its raster child. Preserve flags on other WMs.
+    if (DXcbWMSupport::instance()->isKwin()
+            && flags.testFlag(Qt::X11BypassWindowManagerHint))
+        flags &= ~Qt::WindowStaysOnTopHint;
+
+    return (flags | Qt::FramelessWindowHint | Qt::CustomizeWindowHint
+            | Qt::NoDropShadowWindowHint) & ~Qt::WindowMinMaxButtonsHint;
+}
+
 DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
     : QObject(window->window())
     , m_nativeWindow(window)
@@ -50,7 +62,7 @@ DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
     mapped[window] = this;
 
     m_frameWindow = new DFrameWindow(window->window());
-    m_frameWindow->setFlags((window->window()->flags() | Qt::FramelessWindowHint | Qt::CustomizeWindowHint | Qt::NoDropShadowWindowHint) & ~Qt::WindowMinMaxButtonsHint);
+    m_frameWindow->setFlags(dxcbFrameFlags(window->window()->flags()));
     m_frameWindow->create();
     m_frameWindow->installEventFilter(this);
     m_frameWindow->setShadowRadius(getShadowRadius());
@@ -344,7 +356,7 @@ void DPlatformWindowHelper::setVisible(bool visible)
 
 void DPlatformWindowHelper::setWindowFlags(Qt::WindowFlags flags)
 {
-    me()->m_frameWindow->setFlags((flags | Qt::FramelessWindowHint | Qt::CustomizeWindowHint | Qt::NoDropShadowWindowHint) & ~Qt::WindowMinMaxButtonsHint);
+    me()->m_frameWindow->setFlags(dxcbFrameFlags(flags));
     window()->QNativeWindow::setWindowFlags(flags);
 }
 
