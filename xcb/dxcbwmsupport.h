@@ -91,6 +91,7 @@ public:
 
     bool isDeepinWM() const;
     bool isKwin() const;
+    bool isGxdeKwinX11() const;
     bool isSupportedByWM(xcb_atom_t atom) const;
     bool isContainsForRootWindow(xcb_atom_t atom) const;
     bool hasBlurWindow() const;
@@ -140,6 +141,7 @@ private:
 
     bool m_isDeepinWM = false;
     bool m_isKwin = false;
+    bool m_isGxdeKwinX11 = false;
     bool m_hasBlurWindow = false;
     bool m_hasComposite = false;
     bool m_hasNoTitlebar = false;
