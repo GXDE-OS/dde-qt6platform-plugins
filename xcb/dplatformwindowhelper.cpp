@@ -43,6 +43,20 @@ PUBLIC_CLASS(QWheelEvent, DPlatformWindowHelper);
 
 QHash<const QPlatformWindow*, DPlatformWindowHelper*> DPlatformWindowHelper::mapped;
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+// QXcbWindow::setWindowFlags() schedules a native window recreation for the
+// next show only when the stays-on-top/bottom hints change, and tool tips
+// always get Qt::WindowStaysOnTopHint there.
+static bool qxcbNeedsRecreation(Qt::WindowFlags oldFlags, Qt::WindowFlags newFlags)
+{
+    if (static_cast<Qt::WindowType>(int(newFlags & Qt::WindowType_Mask)) == Qt::ToolTip)
+        newFlags |= Qt::WindowStaysOnTopHint;
+
+    const Qt::WindowFlags hints = Qt::WindowStaysOnTopHint | Qt::WindowStaysOnBottomHint;
+    return (oldFlags & hints) != (newFlags & hints);
+}
+#endif
+
 static Qt::WindowFlags dxcbFrameFlags(Qt::WindowFlags flags)
 {
     // On KWin/X11, combining override-redirect and stays-on-top on the
@@ -402,7 +416,10 @@ void DPlatformWindowHelper::setWindowFlags(Qt::WindowFlags flags)
         // first so the old native frame cannot destroy its X11 child.
         helper->m_nativeWindow->QNativeWindow::setParent(nullptr);
         helper->m_pendingNativeParent = true;
-        helper->m_recreateNativeOnShow = true;
+        // Only recreate the content when Qt would do so itself on show, which
+        // would create it outside the frame. Otherwise keep its native window.
+        helper->m_recreateNativeOnShow = helper->m_recreateNativeOnShow
+                || qxcbNeedsRecreation(helper->m_nativeWindow->window()->flags(), flags);
     }
 #endif
     helper->m_frameWindow->setFlags(dxcbFrameFlags(flags));
