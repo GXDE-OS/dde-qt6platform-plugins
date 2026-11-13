@@ -102,6 +102,7 @@ void DXcbWMSupport::updateWMName(bool emitSignal)
     _deepin_scissor_window = Utility::internAtom(QT_STRINGIFY(_DEEPIN_SCISSOR_WINDOW), false);
 
     m_wmName.clear();
+    bool hasGxdeKwinX11Marker = false;
 
     xcb_connection_t *xcb_connection = DPlatformIntegration::xcbConnection()->xcb_connection();
     xcb_window_t root = DPlatformIntegration::xcbConnection()->primaryScreen()->root();
@@ -127,12 +128,26 @@ void DXcbWMSupport::updateWMName(bool emitSignal)
             }
 
             free(windowManagerReply);
+
+            // gxde-kwin_x11 (GXDE's KWin 6 X11 window manager) sets this on its
+            // supporting window. deepin-kwin also calls itself "KWin", so the
+            // name alone cannot tell them apart.
+            xcb_atom_t gxdeKwinX11Atom = Utility::internAtom(QT_STRINGIFY(_GXDE_KWIN_X11));
+            if (gxdeKwinX11Atom != XCB_ATOM_NONE) {
+                xcb_get_property_reply_t *markerReply =
+                    xcb_get_property_reply(xcb_connection,
+                        xcb_get_property_unchecked(xcb_connection, false, windowManager,
+                                         gxdeKwinX11Atom, XCB_GET_PROPERTY_TYPE_ANY, 0, 1), NULL);
+                hasGxdeKwinX11Marker = markerReply && markerReply->type != XCB_ATOM_NONE;
+                free(markerReply);
+            }
         }
     }
     free(reply);
 
     m_isDeepinWM = (m_wmName == QStringLiteral("Mutter(DeepinGala)"));
     m_isKwin = !m_isDeepinWM && (m_wmName == QStringLiteral("KWin"));
+    m_isGxdeKwinX11 = m_isKwin && hasGxdeKwinX11Marker;
 
     updateHasComposite();
     updateNetWMAtoms();
@@ -538,6 +553,11 @@ bool DXcbWMSupport::isDeepinWM() const
 bool DXcbWMSupport::isKwin() const
 {
     return m_isKwin;
+}
+
+bool DXcbWMSupport::isGxdeKwinX11() const
+{
+    return m_isGxdeKwinX11;
 }
 
 bool DXcbWMSupport::isSupportedByWM(xcb_atom_t atom) const
