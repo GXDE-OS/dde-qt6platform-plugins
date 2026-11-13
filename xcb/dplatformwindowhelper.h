@@ -97,6 +97,10 @@ public:
     static bool windowRedirectContent(QWindow *window);
 
 private:
+    void setVisibleImpl(bool visible);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    void onWindowManagerChanged();
+#endif
     bool eventFilter(QObject *watched, QEvent *event) Q_DECL_OVERRIDE;
     void setNativeWindowGeometry(const QRect &rect, bool onlyResize = false);
 
@@ -144,6 +148,10 @@ private:
 
     QNativeWindow *m_nativeWindow;
     DFrameWindow *m_frameWindow;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    bool m_pendingNativeParent = false;
+    bool m_recreateNativeOnShow = false;
+#endif
 
     QRect m_windowValidGeometry;
 

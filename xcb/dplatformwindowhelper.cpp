@@ -43,6 +43,18 @@ PUBLIC_CLASS(QWheelEvent, DPlatformWindowHelper);
 
 QHash<const QPlatformWindow*, DPlatformWindowHelper*> DPlatformWindowHelper::mapped;
 
+static Qt::WindowFlags dxcbFrameFlags(Qt::WindowFlags flags)
+{
+    // On KWin/X11, combining override-redirect and stays-on-top on the
+    // DXCB frame can hide its raster child. Preserve flags on other WMs.
+    if (DXcbWMSupport::instance()->isKwin()
+            && flags.testFlag(Qt::X11BypassWindowManagerHint))
+        flags &= ~Qt::WindowStaysOnTopHint;
+
+    return (flags | Qt::FramelessWindowHint | Qt::CustomizeWindowHint
+            | Qt::NoDropShadowWindowHint) & ~Qt::WindowMinMaxButtonsHint;
+}
+
 DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
     : QObject(window->window())
     , m_nativeWindow(window)
@@ -50,7 +62,7 @@ DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
     mapped[window] = this;
 
     m_frameWindow = new DFrameWindow(window->window());
-    m_frameWindow->setFlags((window->window()->flags() | Qt::FramelessWindowHint | Qt::CustomizeWindowHint | Qt::NoDropShadowWindowHint) & ~Qt::WindowMinMaxButtonsHint);
+    m_frameWindow->setFlags(dxcbFrameFlags(window->window()->flags()));
     m_frameWindow->create();
     m_frameWindow->installEventFilter(this);
     m_frameWindow->setShadowRadius(getShadowRadius());
@@ -63,7 +75,16 @@ DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
     // 防止被自动更新窗口大小(参见：qdeepintheme.cpp, https://github.com/linuxdeepin/qt5integration)
     m_frameWindow->setProperty("_d_disable_update_geometry_for_scale", true);
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    // KWin can recreate a tooltip frame on its first show. Keep the content
+    // outside the old frame until the new native frame is available.
+    m_pendingNativeParent = window->window()->type() == Qt::ToolTip
+            && DXcbWMSupport::instance()->isKwin();
+    if (!m_pendingNativeParent)
+        window->setParent(m_frameWindow->handle());
+#else
     window->setParent(m_frameWindow->handle());
+#endif
     window->window()->installEventFilter(this);
     window->window()->setScreen(m_frameWindow->screen());
     window->window()->setProperty("_d_real_winId", window->winId());
@@ -127,8 +148,13 @@ DPlatformWindowHelper::DPlatformWindowHelper(QNativeWindow *window)
             this, &DPlatformWindowHelper::onFrameWindowContentMarginsHintChanged);
     connect(DWMSupport::instance(), &DXcbWMSupport::hasCompositeChanged,
             this, &DPlatformWindowHelper::onWMHasCompositeChanged);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    connect(DWMSupport::instance(), &DXcbWMSupport::windowManagerChanged,
+            this, &DPlatformWindowHelper::onWindowManagerChanged);
+#else
     connect(DWMSupport::instance(), &DXcbWMSupport::windowManagerChanged,
             this, &DPlatformWindowHelper::updateWindowBlurAreasForWM);
+#endif
     // 必须保证两个窗口QScreen对象一致
     connect(m_frameWindow, &DFrameWindow::screenChanged,
             this, &DPlatformWindowHelper::onScreenChanged);
@@ -214,7 +240,12 @@ QWindow *topvelWindow(QWindow *w)
 
 void DPlatformWindowHelper::setVisible(bool visible)
 {
-    DPlatformWindowHelper *helper = me();
+    me()->setVisibleImpl(visible);
+}
+
+void DPlatformWindowHelper::setVisibleImpl(bool visible)
+{
+    DPlatformWindowHelper *helper = this;
 
     if (visible) {
         QWindow *tp = helper->m_nativeWindow->window()->transientParent();
@@ -300,6 +331,21 @@ void DPlatformWindowHelper::setVisible(bool visible)
 #endif
 
         helper->m_frameWindow->setVisible(visible);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        if (helper->m_recreateNativeOnShow) {
+            // A window type change can leave Qt XCB with a pending native
+            // recreation. Perform it before attaching and showing the child.
+            helper->m_nativeWindow->QNativeWindow::create();
+            helper->m_nativeWindow->window()->setProperty("_d_real_winId", helper->m_nativeWindow->QNativeWindow::winId());
+            helper->m_recreateNativeOnShow = false;
+        }
+        if (helper->m_pendingNativeParent
+                || (helper->m_nativeWindow->window()->type() == Qt::ToolTip
+                    && DXcbWMSupport::instance()->isKwin())) {
+            helper->m_nativeWindow->QNativeWindow::setParent(helper->m_frameWindow->handle());
+            helper->m_pendingNativeParent = false;
+        }
+#endif
         helper->updateContentWindowGeometry();
         helper->m_nativeWindow->QNativeWindow::setVisible(visible);
         helper->updateWindowBlurAreasForWM();
@@ -344,8 +390,27 @@ void DPlatformWindowHelper::setVisible(bool visible)
 
 void DPlatformWindowHelper::setWindowFlags(Qt::WindowFlags flags)
 {
-    me()->m_frameWindow->setFlags((flags | Qt::FramelessWindowHint | Qt::CustomizeWindowHint | Qt::NoDropShadowWindowHint) & ~Qt::WindowMinMaxButtonsHint);
+    DPlatformWindowHelper *helper = me();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    const bool typeChanged = DXcbWMSupport::instance()->isKwin()
+            && (helper->m_frameWindow->flags() & Qt::WindowType_Mask) != (flags & Qt::WindowType_Mask);
+    const bool wasVisible = typeChanged && helper->m_frameWindow->isVisible();
+    if (wasVisible)
+        helper->setVisibleImpl(false);
+    if (typeChanged) {
+        // A type change can recreate the frame on show. Detach the content
+        // first so the old native frame cannot destroy its X11 child.
+        helper->m_nativeWindow->QNativeWindow::setParent(nullptr);
+        helper->m_pendingNativeParent = true;
+        helper->m_recreateNativeOnShow = true;
+    }
+#endif
+    helper->m_frameWindow->setFlags(dxcbFrameFlags(flags));
     window()->QNativeWindow::setWindowFlags(flags);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    if (wasVisible)
+        helper->setVisibleImpl(true);
+#endif
 }
 
 #if QT_VERSION < QT_VERSION_CHECK(5, 10, 0)
@@ -576,9 +641,24 @@ bool DPlatformWindowHelper::eventFilter(QObject *watched, QEvent *event)
         case QEvent::Close:
             m_nativeWindow->window()->close();
             return true;
+        case QEvent::WindowDeactivate: {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+            // KWin may deactivate the tooltip frame while focus is still on
+            // its content, or on its owner for a non-focusable tooltip.
+            QWindow *tip = m_nativeWindow->window();
+            QWindow *focus = QGuiApplication::focusWindow();
+            if (tip->type() == Qt::ToolTip
+                    && DXcbWMSupport::instance()->isKwin()
+                    && (focus == tip
+                        || (tip->flags().testFlag(Qt::WindowDoesNotAcceptFocus)
+                            && focus && focus == tip->transientParent())))
+                return true;
+#endif
+            QCoreApplication::sendEvent(m_nativeWindow->window(), event);
+            return true;
+        }
         case QEvent::KeyPress:
         case QEvent::KeyRelease:
-        case QEvent::WindowDeactivate:
             QCoreApplication::sendEvent(m_nativeWindow->window(), event);
             return true;
         case QEvent::Move: {
@@ -1428,6 +1508,28 @@ void DPlatformWindowHelper::onFrameWindowContentMarginsHintChanged(const QMargin
 
     updateContentWindowGeometry();
 }
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+void DPlatformWindowHelper::onWindowManagerChanged()
+{
+    updateWindowBlurAreasForWM();
+
+    const Qt::WindowFlags flags = dxcbFrameFlags(m_nativeWindow->window()->flags());
+    if (m_frameWindow->flags() == flags)
+        return;
+
+    // Qt XCB may recreate the frame when its stacking hints change. Keep
+    // the native content outside the old frame until the replacement shows.
+    const bool wasVisible = m_frameWindow->isVisible();
+    if (wasVisible)
+        setVisibleImpl(false);
+    m_nativeWindow->QNativeWindow::setParent(nullptr);
+    m_pendingNativeParent = true;
+    m_frameWindow->setFlags(flags);
+    if (wasVisible)
+        setVisibleImpl(true);
+}
+#endif
 
 void DPlatformWindowHelper::onWMHasCompositeChanged()
 {
