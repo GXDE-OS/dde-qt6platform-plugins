@@ -7,7 +7,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/GXDE-OS/dde-qt6platform-plugins"
 license=('LGPL-3.0-or-later' 'GPL-3.0-or-later')
 depends=('qt6-base' 'libx11' 'libxcb' 'libxi' 'xcb-util-wm' 'xcb-util-cursor' 'libgcc' 'libstdc++' 'glibc')
-makedepends=('git' 'cmake' 'ninja' 'qt6-tools' 'qt6-xcb-private-headers' 'vulkan-headers')
+makedepends=('git' 'cmake' 'ninja' 'qt6-tools' 'qt6-xcb-private-headers' 'vulkan-headers' 'cairo')
 provides=("deepin-qt6platform-plugins=$pkgver" "deepin-qt6platform-plugins-git=$pkgver")
 conflicts=('deepin-qt6platform-plugins' 'deepin-qt6platform-plugins-git')
 replaces=('deepin-qt6platform-plugins-git')
